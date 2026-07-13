@@ -1,6 +1,7 @@
 import os
 import re
 import requests
+from playwright.sync_api import sync_playwright
 
 URL = "https://www.bitomat.com/ru/bitomaty/bitkoin-bankomat-vinnytsia"
 STATE_FILE = "last_value.txt"
@@ -10,22 +11,23 @@ CHAT_ID = os.environ["CHAT_ID"]
 
 
 def fetch_cash_amount() -> int:
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-        )
-    }
-    resp = requests.get(URL, headers=headers, timeout=20)
-    resp.raise_for_status()
-    html = resp.text
+    # Сумма подгружается на сайте через JavaScript уже после загрузки
+    # страницы, поэтому обычный requests её не видит — открываем страницу
+    # в настоящем (headless) браузере и ждём, пока JS её отрисует.
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(URL, wait_until="networkidle", timeout=60000)
+        page.wait_for_timeout(3000)  # доп. запас, чтобы JS точно успел отрисовать цифры
+        html = page.content()
+        browser.close()
 
     # Ищем число сразу после фразы "Доступная наличность сейчас"
     match = re.search(r"Доступная наличность сейчас[^\d]{0,80}(\d[\d\s]*)", html)
     if not match:
         raise RuntimeError(
-            "Не нашёл сумму на странице. Возможно, сайт отдаёт её через JS, "
-            "и обычный requests её не видит — тогда нужен вариант с headless-браузером."
+            "Не нашёл сумму на странице даже после рендеринга JS — "
+            "возможно, сайт поменял вёрстку, нужно проверять вручную."
         )
     raw = match.group(1)
     return int(re.sub(r"\s", "", raw))
