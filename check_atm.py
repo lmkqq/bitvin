@@ -18,12 +18,23 @@ def fetch_cash_amount() -> int:
         browser = p.chromium.launch()
         page = browser.new_page()
         page.goto(URL, wait_until="networkidle", timeout=60000)
-        page.wait_for_timeout(3000)  # доп. запас, чтобы JS точно успел отрисовать цифры
-        html = page.content()
+
+        html = ""
+        match = None
+        # Пробуем до 10 раз с паузами — если число ещё не отрисовалось,
+        # ждём ещё. Требуем минимум 3 цифры подряд, чтобы не зацепить
+        # случайную одиночную цифру из ещё не прогруженного плейсхолдера.
+        for _ in range(10):
+            html = page.content()
+            match = re.search(
+                r"Доступная наличность сейчас[^\d]{0,80}(\d{3,}[\d\s]*)", html
+            )
+            if match:
+                break
+            page.wait_for_timeout(1500)
+
         browser.close()
 
-    # Ищем число сразу после фразы "Доступная наличность сейчас"
-    match = re.search(r"Доступная наличность сейчас[^\d]{0,80}(\d[\d\s]*)", html)
     if not match:
         raise RuntimeError(
             "Не нашёл сумму на странице даже после рендеринга JS — "
